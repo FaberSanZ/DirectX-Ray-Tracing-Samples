@@ -1,37 +1,37 @@
 # ConstantBuffer
 
-Quinto paso de la serie DXR: agregar constant buffers, camara real y matrices.
+The fifth step in the DXR series: add constant buffers, a real camera, and matrices.
 
-Este ejemplo transforma la malla indexada en un cubo y agrega un CBV al root signature global. El shader usa ese constant buffer para recibir matrices `world`, `view`, `projection` e `inverseViewProjection`.
+This sample turns the indexed mesh into a cube and adds a CBV to the global root signature. The shader receives `world`, `view`, `projection`, and `inverseViewProjection` matrices through a constant buffer.
 
-El cubo rota de verdad en DXR: cada frame se actualiza la matriz de instancia de la TLAS y se reconstruye la TLAS antes de llamar `DispatchRays`.
+The cube rotates in the DXR scene itself: every frame updates the TLAS instance transform and rebuilds the TLAS before calling `DispatchRays`.
 
-## Que se aprende
+## What You Learn
 
-- Crear un cubo con vertex buffer e index buffer.
-- Construir una BLAS con 8 vertices y 36 indices.
-- Crear un upload buffer alineado a 256 bytes para constantes.
-- Bindear un CBV directamente en la root signature.
-- Leer `ConstantBuffer<T>` desde HLSL en una libreria DXR.
-- Generar rayos primarios desde una camara con matrices.
-- Rotar una instancia DXR reconstruyendo la TLAS.
+- Create a cube with a vertex buffer and index buffer.
+- Build a BLAS with 8 vertices and 36 indices.
+- Create a 256-byte-aligned upload buffer for constants.
+- Bind a CBV directly in the global root signature.
+- Read `ConstantBuffer<T>` from HLSL in a DXR library.
+- Generate primary rays from a matrix-based camera.
+- Rotate a DXR instance by rebuilding the TLAS.
 
-## Flujo DXR
+## DXR Flow
 
-1. Se crea un cubo indexado.
-2. La BLAS se construye con los vertices e indices del cubo.
-3. Se crea `SceneConstants` con matrices reales de camara.
-4. El root signature expone:
+1. Create an indexed cube.
+2. Build the BLAS from the cube vertices and indices.
+3. Create `SceneConstants` with real camera matrices.
+4. The root signature exposes:
    - `t0`: TLAS.
    - `t1`: vertices.
    - `t2`: indices.
-   - `u0`: textura de salida.
+   - `u0`: output texture.
    - `b0`: constant buffer.
-5. El ray generation shader usa `inverseViewProjection` para reconstruir rayos de camara.
-6. El closest-hit shader interpola los colores del cubo.
-7. Cada frame la app cambia la matriz `world`, actualiza la instancia TLAS y el cubo gira.
+5. The ray generation shader uses `inverseViewProjection` to reconstruct camera rays.
+6. The closest-hit shader interpolates cube colors.
+7. Every frame, the app changes the `world` matrix, updates the TLAS instance, and the cube rotates.
 
-## Constant buffer
+## Constant Buffer
 
 ```cpp
 struct SceneConstants
@@ -45,13 +45,13 @@ struct SceneConstants
 };
 ```
 
-En HLSL:
+In HLSL:
 
 ```hlsl
 ConstantBuffer<SceneConstants> gScene : register(b0);
 ```
 
-El ray generation shader crea rayos con:
+The ray generation shader creates rays with:
 
 ```hlsl
 float4 nearPoint = mul(float4(ndc, 0.0f, 1.0f), gScene.inverseViewProjection);
@@ -60,13 +60,13 @@ ray.Origin = gScene.cameraPosition.xyz;
 ray.Direction = normalize(farPoint.xyz - nearPoint.xyz);
 ```
 
-## Compilar
+## Build
 
 ```powershell
 cmake --build build --config Debug --target ConstantBuffer
 ```
 
-## Ejecutar
+## Run
 
 ```powershell
 .\build\Debug\ConstantBuffer.exe

@@ -1,30 +1,30 @@
 # VertexBuffer
 
-Tercer paso de la serie DXR: leer datos de vertices desde el closest-hit shader.
+The third step in the DXR series: read vertex data from the closest-hit shader.
 
-El ejemplo anterior solo usaba la geometria para intersectar. Aqui ademas exponemos el vertex buffer como `StructuredBuffer<Vertex>` para que el shader pueda interpolar color usando coordenadas baricentricas.
+The previous sample only used geometry for intersection. Here, the vertex buffer is also exposed as a `StructuredBuffer<Vertex>` so the shader can interpolate color with barycentric coordinates.
 
-## Que se aprende
+## What You Learn
 
-- Crear un vertex buffer con posicion y color.
-- Crear una SRV de buffer estructurado.
-- Agregar un descriptor `t1` para vertices.
-- Usar `PrimitiveIndex()` dentro del closest-hit shader.
-- Interpolar atributos con `BuiltInTriangleIntersectionAttributes`.
+- Create a vertex buffer with position and color.
+- Create a structured-buffer SRV.
+- Add a `t1` descriptor for vertex data.
+- Use `PrimitiveIndex()` inside the closest-hit shader.
+- Interpolate attributes with `BuiltInTriangleIntersectionAttributes`.
 
-## Flujo DXR
+## DXR Flow
 
-1. Se crea un buffer con tres vertices.
-2. La BLAS usa las posiciones del mismo buffer para describir el triangulo.
-3. Se crea una SRV estructurada para acceder al buffer desde HLSL.
-4. El root signature expone:
+1. Create a buffer with three vertices.
+2. The BLAS uses positions from that same buffer to describe the triangle.
+3. Create a structured SRV so HLSL can read the buffer.
+4. The root signature exposes:
    - `t0`: TLAS.
    - `t1`: `StructuredBuffer<Vertex>`.
-   - `u0`: textura de salida.
-5. El closest-hit shader calcula los indices del triangulo.
-6. Se interpolan colores con `u`, `v`, `w`.
+   - `u0`: output texture.
+5. The closest-hit shader computes the triangle vertex indices.
+6. The shader interpolates colors with `u`, `v`, and `w`.
 
-## Shader clave
+## Key Shader
 
 ```hlsl
 uint triIndex = PrimitiveIndex();
@@ -40,13 +40,13 @@ float w = 1.0 - u - v;
 payload.color = v0.color * w + v1.color * u + v2.color * v;
 ```
 
-## Compilar
+## Build
 
 ```powershell
 cmake --build build --config Debug --target VertexBuffer
 ```
 
-## Ejecutar
+## Run
 
 ```powershell
 .\build\Debug\VertexBuffer.exe

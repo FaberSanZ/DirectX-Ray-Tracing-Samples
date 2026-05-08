@@ -1,31 +1,31 @@
 # ClearScreen
 
-Primer paso de la serie DXR: escribir directamente a una textura desde un ray generation shader.
+The first step in the DXR series: write directly to a texture from a ray generation shader.
 
-En este ejemplo no hay geometria, BLAS, TLAS, miss shader ni closest-hit shader. La idea es aislar el minimo necesario para crear un pipeline DXR y lanzar `DispatchRays`.
+This sample has no geometry, BLAS, TLAS, miss shader, or closest-hit shader. The goal is to isolate the minimum required pieces for creating a DXR pipeline and calling `DispatchRays`.
 
-## Que se aprende
+## What You Learn
 
-- Crear un dispositivo Direct3D 12 con soporte DXR.
-- Crear una `ID3D12StateObject` de raytracing.
-- Compilar una libreria HLSL `lib_6_3` con DXC.
-- Crear una root signature global con una UAV.
-- Crear un shader table con un unico registro: `rayGen`.
-- Escribir pixeles en una `RWTexture2D<float4>`.
-- Copiar la textura de salida al back buffer.
+- Create a Direct3D 12 device with DXR support.
+- Create an `ID3D12StateObject` raytracing pipeline.
+- Compile a `lib_6_3` HLSL library with DXC.
+- Create a global root signature with one UAV.
+- Create a shader table with a single `rayGen` record.
+- Write pixels into a `RWTexture2D<float4>`.
+- Copy the output texture to the swap-chain back buffer.
 
-## Flujo DXR
+## DXR Flow
 
-1. Se crea una textura `mpOutputResource` con `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`.
-2. Se crea una UAV en un descriptor heap shader-visible.
-3. El root signature expone esa UAV como `u0`.
-4. El shader `rayGen` usa `DispatchRaysIndex()` y `DispatchRaysDimensions()` para calcular un color por pixel.
-5. La aplicacion ejecuta `DispatchRays`.
-6. El resultado se copia al back buffer del swap chain.
+1. Create `mpOutputResource` with `D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS`.
+2. Create a UAV in a shader-visible descriptor heap.
+3. Expose that UAV as `u0` in the root signature.
+4. The `rayGen` shader uses `DispatchRaysIndex()` and `DispatchRaysDimensions()` to compute one color per pixel.
+5. The application calls `DispatchRays`.
+6. The result is copied into the swap-chain back buffer.
 
-## Shader principal
+## Main Shader
 
-El shader esta en `Assets/Shaders/ClearScreen/Mesh.hlsl`.
+The shader lives in `Assets/Shaders/ClearScreen/Mesh.hlsl`.
 
 ```hlsl
 RWTexture2D<float4> gOutput : register(u0);
@@ -39,13 +39,13 @@ void rayGen()
 }
 ```
 
-## Compilar
+## Build
 
 ```powershell
 cmake --build build --config Debug --target ClearScreen
 ```
 
-## Ejecutar
+## Run
 
 ```powershell
 .\build\Debug\ClearScreen.exe

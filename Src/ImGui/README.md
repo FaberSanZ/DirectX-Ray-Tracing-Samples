@@ -1,47 +1,47 @@
 # ImGui
 
-Sexto paso de la serie DXR: superponer Dear ImGui sobre una escena DXR con camara real.
+The sixth step in the DXR series: draw Dear ImGui over a DXR scene with a real camera.
 
-La escena sigue siendo raytraced. ImGui no reemplaza el render DXR: se dibuja despues de `DispatchRays` y despues de copiar la textura raytraced al back buffer.
+The scene is still raytraced. ImGui does not replace the DXR render path: it is drawn after `DispatchRays` and after copying the raytraced texture into the back buffer.
 
-Este ejemplo conserva las matrices `world`, `view`, `projection` e `inverseViewProjection` del ejemplo `ConstantBuffer`. El cubo gira actualizando la transformacion de instancia en la TLAS cada frame.
+This sample keeps the `world`, `view`, `projection`, and `inverseViewProjection` matrices from `ConstantBuffer`. The cube rotates by updating the TLAS instance transform every frame.
 
-## Que se aprende
+## What You Learn
 
-- Integrar Dear ImGui usando el backend Win32 + DirectX 12.
-- Usar un descriptor heap shader-visible separado para ImGui.
-- Dibujar UI encima del resultado DXR.
-- Sincronizar el uso del command allocator con fence.
-- Usar barreras correctas para pasar entre UAV, copy, render target y present.
-- Controlar parametros de camara y tinte desde ImGui.
-- Mantener el cubo rotando mientras la UI se dibuja encima.
+- Integrate Dear ImGui with the Win32 + DirectX 12 backends.
+- Use a separate shader-visible descriptor heap for ImGui.
+- Draw UI on top of a DXR result.
+- Synchronize command allocator reuse with a fence.
+- Use correct barriers between UAV, copy, render target, and present states.
+- Control camera and tint parameters from ImGui.
+- Keep the cube rotating while the UI is drawn on top.
 
-## Flujo de frame
+## Frame Flow
 
-1. La app actualiza `SceneConstants`.
-2. La app actualiza la matriz de instancia y reconstruye la TLAS.
-3. El ray generation shader escribe en `mpOutputResource` como UAV.
-4. Se inserta una UAV barrier.
-5. `mpOutputResource` transiciona de `UNORDERED_ACCESS` a `COPY_SOURCE`.
-6. El back buffer transiciona de `PRESENT` a `COPY_DEST`.
-7. Se copia el resultado DXR al back buffer.
-8. El back buffer transiciona de `COPY_DEST` a `RENDER_TARGET`.
-9. ImGui genera y dibuja sus comandos.
-10. El back buffer transiciona de `RENDER_TARGET` a `PRESENT`.
-11. Se presenta el frame.
-12. Se espera la fence antes de resetear allocator/list.
+1. The app updates `SceneConstants`.
+2. The app updates the instance matrix and rebuilds the TLAS.
+3. The ray generation shader writes into `mpOutputResource` as a UAV.
+4. A UAV barrier is inserted.
+5. `mpOutputResource` transitions from `UNORDERED_ACCESS` to `COPY_SOURCE`.
+6. The back buffer transitions from `PRESENT` to `COPY_DEST`.
+7. The DXR result is copied into the back buffer.
+8. The back buffer transitions from `COPY_DEST` to `RENDER_TARGET`.
+9. ImGui generates and draws its command data.
+10. The back buffer transitions from `RENDER_TARGET` to `PRESENT`.
+11. The frame is presented.
+12. The app waits on the fence before resetting the allocator/list.
 
-## Por que importan las barreras
+## Why Barriers Matter
 
-Sin estas transiciones, la UI puede parpadear o verse inestable porque el back buffer se usa como destino de copia y render target en el mismo frame. Direct3D 12 no hace esas transiciones por nosotros.
+Without these transitions, the UI can flicker or become unstable because the back buffer is used as both a copy destination and a render target in the same frame. Direct3D 12 does not perform those transitions automatically.
 
-## Compilar
+## Build
 
 ```powershell
 cmake --build build --config Debug --target ImGui
 ```
 
-## Ejecutar
+## Run
 
 ```powershell
 .\build\Debug\ImGui.exe

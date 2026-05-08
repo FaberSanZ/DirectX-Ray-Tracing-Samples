@@ -1,31 +1,31 @@
 # IndexBuffer
 
-Cuarto paso de la serie DXR: agregar index buffer.
+The fourth step in the DXR series: add an index buffer.
 
-En `VertexBuffer`, cada triangulo asumiria vertices consecutivos. Aqui se separan vertices e indices, que es el patron normal para mallas reales.
+In `VertexBuffer`, each triangle assumes consecutive vertices. This sample separates vertices and indices, which is the common pattern for real meshes.
 
-## Que se aprende
+## What You Learn
 
-- Crear un index buffer de `uint32_t`.
-- Construir la BLAS con `IndexBuffer`, `IndexCount` e `IndexFormat`.
-- Crear una SRV para leer indices desde el closest-hit shader.
-- Usar `PrimitiveIndex()` para buscar tres indices por triangulo.
-- Reutilizar vertices compartidos.
+- Create a `uint32_t` index buffer.
+- Build the BLAS with `IndexBuffer`, `IndexCount`, and `IndexFormat`.
+- Create an SRV so the closest-hit shader can read indices.
+- Use `PrimitiveIndex()` to fetch three indices per triangle.
+- Reuse shared vertices.
 
-## Flujo DXR
+## DXR Flow
 
-1. Se crean cuatro vertices para formar un rectangulo.
-2. Se crean seis indices para dos triangulos.
-3. La BLAS recibe el vertex buffer y el index buffer.
-4. El root signature expone:
+1. Create four vertices for a rectangle.
+2. Create six indices for two triangles.
+3. The BLAS receives both the vertex buffer and index buffer.
+4. The root signature exposes:
    - `t0`: TLAS.
    - `t1`: vertices.
    - `t2`: indices.
-   - `u0`: textura de salida.
-5. El closest-hit shader lee tres indices.
-6. Luego usa esos indices para traer los vertices reales.
+   - `u0`: output texture.
+5. The closest-hit shader reads three indices.
+6. It then uses those indices to fetch the real vertices.
 
-## Shader clave
+## Key Shader
 
 ```hlsl
 uint triIndex = PrimitiveIndex() * 3;
@@ -35,13 +35,13 @@ Vertex v1 = gVertices[gIndices[triIndex + 1]];
 Vertex v2 = gVertices[gIndices[triIndex + 2]];
 ```
 
-## Compilar
+## Build
 
 ```powershell
 cmake --build build --config Debug --target IndexBuffer
 ```
 
-## Ejecutar
+## Run
 
 ```powershell
 .\build\Debug\IndexBuffer.exe
