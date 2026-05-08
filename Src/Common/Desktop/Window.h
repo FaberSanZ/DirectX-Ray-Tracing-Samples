@@ -4,8 +4,8 @@
 #include <tchar.h>
 
 #include <functional>
-#include "../Dta/imgui.h"
-#include "../Dta/imgui_impl_win32.h"
+#include <imgui.h>
+#include <imgui_impl_win32.h>
 
 
 

@@ -1,4 +1,4 @@
-﻿// VertexBuffer.cpp : This file contains the 'main' function. Program execution begins and ends there.
+﻿// ImGui.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 #include <Windows.h>
 #include <d3d12.h>
@@ -9,6 +9,25 @@
 #include <dxcapi.h>
 #include <DirectXMath.h>
 #include "../Common/ShaderCompiler.h"
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx12.h>
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+LRESULT CALLBACK ImGuiWindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+        return true;
+
+    if (msg == WM_CLOSE)
+    {
+        PostQuitMessage(0);
+        return 0;
+    }
+
+    return DefWindowProc(hWnd, msg, wParam, lParam);
+}
 
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -36,7 +55,12 @@ public:
     uint64_t mFenceValue = 0;
 
     ID3D12Resource* pSwapChainBuffer[3];
+    ID3D12Resource* mpIndexBuffer;
     ID3D12Resource* mpVertexBuffer;
+    ID3D12Resource* mpConstantBuffer;
+    ID3D12Resource* mpTopLevelASScratch;
+    ID3D12Resource* mpTopLevelASInstanceDesc;
+    float m_CubeRotation = 0.0f;
     ID3D12Resource* mpTopLevelAS;
     ID3D12Resource* mpBottomLevelAS;
     ID3D12Resource* mpOutputResource;
@@ -49,6 +73,9 @@ public:
 
     ID3D12DescriptorHeap* m_SrvUavHeap;
     ID3D12DescriptorHeap* m_RenderTargetViewHeap;
+    ID3D12DescriptorHeap* m_ImGuiHeap;
+    float m_Tint[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    float m_Camera[4] = { 0.0f, 0.0f, -2.4f, 1.0f };
 
     struct AccelerationStructureBuffers
     {
@@ -68,6 +95,16 @@ public:
     {
         float position[3];
         float color[3];
+    };
+
+    struct SceneConstants
+    {
+        DirectX::XMFLOAT4X4 world;
+        DirectX::XMFLOAT4X4 view;
+        DirectX::XMFLOAT4X4 projection;
+        DirectX::XMFLOAT4X4 inverseViewProjection;
+        float tint[4];
+        float cameraPosition[4];
     };
 
     void Initialize(HWND handle, uint32_t w, uint32_t h)
@@ -106,7 +143,7 @@ public:
         m_RenderTargetViewHeap = createDescriptorHeap(pDevice, frameCount, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, false);
 
         // Create descriptor heap for shader resource views and unordered access views. We need at least 2 descriptors: one for the output texture (UAV) and one for the TLAS (SRV)
-        m_SrvUavHeap = createDescriptorHeap(pDevice, 3, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
+        m_SrvUavHeap = createDescriptorHeap(pDevice, 4, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
 
 
         auto m_DescriptorSize = pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -135,6 +172,29 @@ public:
         createRtPipelineState(); // create the raytracing pipeline state object with the raygen, miss and hit shaders
         createShaderResourceUAV(); // create the output resource and the UAV for it
         createShaderTable(); // create the shader table with the required entries for raygen, miss and hit shaders, and fill it with the shader identifiers and the root arguments
+        initializeImGui(handle);
+    }
+
+    void initializeImGui(HWND handle)
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+        ImGui_ImplWin32_Init(handle);
+
+        m_ImGuiHeap = createDescriptorHeap(pDevice, 1024, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, true);
+
+        ImGui_ImplDX12_InitInfo initInfo = {};
+        initInfo.Device = pDevice;
+        initInfo.CommandQueue = mpCmdQueue;
+        initInfo.NumFramesInFlight = frameCount;
+        initInfo.RTVFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        initInfo.DSVFormat = DXGI_FORMAT_UNKNOWN;
+        initInfo.SrvDescriptorHeap = m_ImGuiHeap;
+        initInfo.LegacySingleSrvCpuDescriptor = m_ImGuiHeap->GetCPUDescriptorHandleForHeapStart();
+        initInfo.LegacySingleSrvGpuDescriptor = m_ImGuiHeap->GetGPUDescriptorHandleForHeapStart();
+
+        ImGui_ImplDX12_Init(&initInfo);
     }
 
     ID3D12DescriptorHeap* createDescriptorHeap(ID3D12Device5* pDevice, uint32_t count, D3D12_DESCRIPTOR_HEAP_TYPE type, bool shaderVisible)
@@ -179,13 +239,37 @@ public:
         return pBuffer;
     }
 
-    ID3D12Resource* createTriangleVB(ID3D12Device5* pDevice)
+    void transitionResource(ID3D12GraphicsCommandList4* cmdList, ID3D12Resource* resource, D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
+    {
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        barrier.Transition.pResource = resource;
+        barrier.Transition.StateBefore = before;
+        barrier.Transition.StateAfter = after;
+        barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        cmdList->ResourceBarrier(1, &barrier);
+    }
+
+    void uavBarrier(ID3D12GraphicsCommandList4* cmdList, ID3D12Resource* resource)
+    {
+        D3D12_RESOURCE_BARRIER barrier = {};
+        barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        barrier.UAV.pResource = resource;
+        cmdList->ResourceBarrier(1, &barrier);
+    }
+
+    ID3D12Resource* createCubeVB(ID3D12Device5* pDevice)
     {
         const Vertex vertices[] =
         {
-            { { 0, 0.7f, 0 },  { 1, 0, 0 } },
-            { { 0.7f, -0.7f, 0 }, { 0, 1, 0 } },
-            { { -0.7f, -0.7f, 0 }, { 0, 0, 1 } },
+            { { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
+            { { -0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f, 1.0f } },
+            { {  0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f } },
+            { {  0.5f, -0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f } },
+            { { -0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f } },
+            { { -0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f, 0.0f } },
+            { {  0.5f,  0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f } },
+            { {  0.5f, -0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f } },
         };
 
         D3D12_HEAP_PROPERTIES heapUpload;
@@ -205,14 +289,46 @@ public:
         return pBuffer;
     }
 
-    AccelerationStructureBuffers createBottomLevelAS(ID3D12Device5* pDevice, ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource* pVB)
+    ID3D12Resource* createCubeIB(ID3D12Device5* pDevice)
+    {
+        const uint32_t indices[] =
+        {
+            0, 1, 2, 0, 2, 3,
+            3, 2, 6, 3, 6, 7,
+            7, 6, 5, 7, 5, 4,
+            4, 5, 1, 4, 1, 0,
+            1, 5, 6, 1, 6, 2,
+            4, 0, 3, 4, 3, 7,
+        };
+
+        D3D12_HEAP_PROPERTIES heapUpload;
+        heapUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
+        heapUpload.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        heapUpload.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        heapUpload.CreationNodeMask = 0;
+        heapUpload.VisibleNodeMask = 0;
+
+        ID3D12Resource* pBuffer = createBuffer(pDevice, sizeof(indices), D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, heapUpload);
+
+        uint8_t* pData;
+        pBuffer->Map(0, nullptr, (void**)&pData);
+        memcpy(pData, indices, sizeof(indices));
+        pBuffer->Unmap(0, nullptr);
+
+        return pBuffer;
+    }
+
+    AccelerationStructureBuffers createBottomLevelAS(ID3D12Device5* pDevice, ID3D12GraphicsCommandList4* pCmdList, ID3D12Resource* pVB, ID3D12Resource* pIB)
     {
         D3D12_RAYTRACING_GEOMETRY_DESC geomDesc = {};
         geomDesc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
         geomDesc.Triangles.VertexBuffer.StartAddress = pVB->GetGPUVirtualAddress();
         geomDesc.Triangles.VertexBuffer.StrideInBytes = sizeof(Vertex);
         geomDesc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-        geomDesc.Triangles.VertexCount = 3;
+        geomDesc.Triangles.VertexCount = 8;
+        geomDesc.Triangles.IndexBuffer = pIB->GetGPUVirtualAddress();
+        geomDesc.Triangles.IndexCount = 36;
+        geomDesc.Triangles.IndexFormat = DXGI_FORMAT_R32_UINT;
         geomDesc.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
 
         // Get the size requirements for the scratch and AS buffers
@@ -331,10 +447,74 @@ public:
         return buffers;
     }
 
+    void updateTopLevelASTransform(float angle)
+    {
+        D3D12_RAYTRACING_INSTANCE_DESC* pInstanceDesc;
+        mpTopLevelASInstanceDesc->Map(0, nullptr, (void**)&pInstanceDesc);
+
+        DirectX::XMFLOAT4X4 worldTransform;
+        DirectX::XMStoreFloat4x4(&worldTransform, DirectX::XMMatrixRotationRollPitchYaw(angle * 0.7f, angle, angle * 0.35f));
+        memcpy(pInstanceDesc->Transform, &worldTransform, sizeof(pInstanceDesc->Transform));
+
+        pInstanceDesc->AccelerationStructure = mpBottomLevelAS->GetGPUVirtualAddress();
+        pInstanceDesc->InstanceMask = 0xFF;
+        mpTopLevelASInstanceDesc->Unmap(0, nullptr);
+
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
+        inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+        inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
+        inputs.NumDescs = 1;
+        inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+        inputs.InstanceDescs = mpTopLevelASInstanceDesc->GetGPUVirtualAddress();
+
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC asDesc = {};
+        asDesc.Inputs = inputs;
+        asDesc.DestAccelerationStructureData = mpTopLevelAS->GetGPUVirtualAddress();
+        asDesc.ScratchAccelerationStructureData = mpTopLevelASScratch->GetGPUVirtualAddress();
+
+        mpCmdList->BuildRaytracingAccelerationStructure(&asDesc, 0, nullptr);
+
+        D3D12_RESOURCE_BARRIER uavBarrier = {};
+        uavBarrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+        uavBarrier.UAV.pResource = mpTopLevelAS;
+        mpCmdList->ResourceBarrier(1, &uavBarrier);
+    }
+
+    void updateSceneConstants(float angle)
+    {
+        SceneConstants constants = {};
+
+        DirectX::XMVECTOR eye = DirectX::XMVectorSet(m_Camera[0], m_Camera[1], m_Camera[2], 1.0f);
+        DirectX::XMVECTOR at = DirectX::XMVectorZero();
+        DirectX::XMVECTOR up = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+        DirectX::XMMATRIX world = DirectX::XMMatrixRotationRollPitchYaw(angle * 0.7f, angle, angle * 0.35f);
+        DirectX::XMMATRIX view = DirectX::XMMatrixLookAtLH(eye, at, up);
+        DirectX::XMMATRIX projection = DirectX::XMMatrixPerspectiveFovLH(DirectX::XMConvertToRadians(45.0f), static_cast<float>(width) / static_cast<float>(height), 0.1f, 100.0f);
+        DirectX::XMMATRIX inverseViewProjection = DirectX::XMMatrixInverse(nullptr, view * projection);
+
+        DirectX::XMStoreFloat4x4(&constants.world, world);
+        DirectX::XMStoreFloat4x4(&constants.view, view);
+        DirectX::XMStoreFloat4x4(&constants.projection, projection);
+        DirectX::XMStoreFloat4x4(&constants.inverseViewProjection, inverseViewProjection);
+
+        memcpy(constants.tint, m_Tint, sizeof(m_Tint));
+        constants.cameraPosition[0] = m_Camera[0];
+        constants.cameraPosition[1] = m_Camera[1];
+        constants.cameraPosition[2] = m_Camera[2];
+        constants.cameraPosition[3] = 1.0f;
+
+        uint8_t* constantsData;
+        mpConstantBuffer->Map(0, nullptr, (void**)&constantsData);
+        memcpy(constantsData, &constants, sizeof(constants));
+        mpConstantBuffer->Unmap(0, nullptr);
+    }
+
     void createAccelerationStructures()
     {
-        mpVertexBuffer = createTriangleVB(pDevice);
-        AccelerationStructureBuffers bottomLevelBuffers = createBottomLevelAS(pDevice, mpCmdList, mpVertexBuffer);
+        mpVertexBuffer = createCubeVB(pDevice);
+        mpIndexBuffer = createCubeIB(pDevice);
+        AccelerationStructureBuffers bottomLevelBuffers = createBottomLevelAS(pDevice, mpCmdList, mpVertexBuffer, mpIndexBuffer);
         AccelerationStructureBuffers topLevelBuffers = createTopLevelAS(pDevice, mpCmdList, bottomLevelBuffers.pResult, mTlasSize);
 
         // The tutorial doesn't have any resource lifetime management, so we flush and sync here. This is not required by the DXR spec - you can submit the list whenever you like as long as you take care of the resources lifetime.
@@ -345,6 +525,8 @@ public:
 
         // Store the AS buffers. The rest of the buffers will be released once we exit the function
         mpTopLevelAS = topLevelBuffers.pResult;
+        mpTopLevelASScratch = topLevelBuffers.pScratch;
+        mpTopLevelASInstanceDesc = topLevelBuffers.pInstanceDesc;
         mpBottomLevelAS = bottomLevelBuffers.pResult;
 
 
@@ -368,7 +550,7 @@ public:
         subobjects.reserve(12);
 
         // Create the DXIL library subobject, which contains the raytracing shaders. We will export all the shaders with the same names as the entry points in the HLSL code, but we could choose different export names if we wanted to
-        auto pShaderBlob = shaderCompiler.Compile(L"../../../../Assets/Shaders/VertexBuffer/Mesh.hlsl", L"lib_6_3");
+        auto pShaderBlob = shaderCompiler.Compile(L"../../Assets/Shaders/ImGui/Mesh.hlsl", L"lib_6_3");
 
         const WCHAR* exports[] =
         {
@@ -410,7 +592,7 @@ public:
         //Global Root Signature for all shaders (empty in this case, but it needs to be defined since we are using resources)
         D3D12_DESCRIPTOR_RANGE srvRange = {};
         srvRange.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        srvRange.NumDescriptors = 2;
+        srvRange.NumDescriptors = 3;
         srvRange.BaseShaderRegister = 0;  // t0
         srvRange.RegisterSpace = 0;
         srvRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -422,7 +604,7 @@ public:
         uavRange.RegisterSpace = 0;
         uavRange.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER rootParams[2] = {};
+        D3D12_ROOT_PARAMETER rootParams[3] = {};
         rootParams[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
         rootParams[0].DescriptorTable.NumDescriptorRanges = 1;
         rootParams[0].DescriptorTable.pDescriptorRanges = &srvRange;
@@ -433,8 +615,13 @@ public:
         rootParams[1].DescriptorTable.pDescriptorRanges = &uavRange;
         rootParams[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
+        rootParams[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParams[2].Descriptor.ShaderRegister = 0;
+        rootParams[2].Descriptor.RegisterSpace = 0;
+        rootParams[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
         D3D12_ROOT_SIGNATURE_DESC globalRSDesc = {};
-        globalRSDesc.NumParameters = 2;
+        globalRSDesc.NumParameters = 3;
         globalRSDesc.pParameters = rootParams;
         globalRSDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
@@ -565,12 +752,12 @@ public:
         heapDefault.CreationNodeMask = 0;
         heapDefault.VisibleNodeMask = 0;
 
-        pDevice->CreateCommittedResource(&heapDefault, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_COPY_SOURCE, nullptr, IID_PPV_ARGS(&mpOutputResource));
+        pDevice->CreateCommittedResource(&heapDefault, D3D12_HEAP_FLAG_NONE, &resDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&mpOutputResource));
 
 
         // Create UAV for the output resource in descriptor heap at index 1 (index 0 is for the TLAS SRV)
         D3D12_CPU_DESCRIPTOR_HANDLE uavCpuHandle = m_SrvUavHeap->GetCPUDescriptorHandleForHeapStart();
-        uavCpuHandle.ptr += 2 * descriptorSize;
+        uavCpuHandle.ptr += 3 * descriptorSize;
 
         D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
         uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
@@ -587,17 +774,45 @@ public:
         vertexSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
         vertexSrvDesc.Format = DXGI_FORMAT_UNKNOWN;
         vertexSrvDesc.Buffer.FirstElement = 0;
-        vertexSrvDesc.Buffer.NumElements = 3; // 3 vértices
+        vertexSrvDesc.Buffer.NumElements = 8;
         vertexSrvDesc.Buffer.StructureByteStride = sizeof(Vertex);
         vertexSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         pDevice->CreateShaderResourceView(mpVertexBuffer, &vertexSrvDesc, vertexSrvHandle);
 
+        D3D12_CPU_DESCRIPTOR_HANDLE indexSrvHandle = m_SrvUavHeap->GetCPUDescriptorHandleForHeapStart();
+        indexSrvHandle.ptr += 2 * descriptorSize;
+
+        D3D12_SHADER_RESOURCE_VIEW_DESC indexSrvDesc = {};
+        indexSrvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+        indexSrvDesc.Format = DXGI_FORMAT_R32_UINT;
+        indexSrvDesc.Buffer.FirstElement = 0;
+        indexSrvDesc.Buffer.NumElements = 36;
+        indexSrvDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_NONE;
+        indexSrvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        pDevice->CreateShaderResourceView(mpIndexBuffer, &indexSrvDesc, indexSrvHandle);
+
+        D3D12_HEAP_PROPERTIES heapUpload;
+        heapUpload.Type = D3D12_HEAP_TYPE_UPLOAD;
+        heapUpload.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        heapUpload.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+        heapUpload.CreationNodeMask = 0;
+        heapUpload.VisibleNodeMask = 0;
+
+        const uint32_t constantBufferSize = (sizeof(SceneConstants) + 255) & ~255;
+        mpConstantBuffer = createBuffer(pDevice, constantBufferSize, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ, heapUpload);
+
+        updateSceneConstants(0.0f);
 
     }
 
     void Loop()
     {
         uint32_t rtvIndex = mpSwapChain->GetCurrentBackBufferIndex();
+
+        m_CubeRotation += 0.01f;
+        updateSceneConstants(m_CubeRotation);
+        updateTopLevelASTransform(m_CubeRotation);
+
         mpCmdList->SetComputeRootSignature(m_RootSig);
 
         ID3D12DescriptorHeap* heaps[] = { m_SrvUavHeap };
@@ -611,8 +826,9 @@ public:
 
         // Root Param 1: UAV (índice 2)
         D3D12_GPU_DESCRIPTOR_HANDLE uavGPU = heapStartGPU;
-        uavGPU.ptr += 2 * descriptorSize;
+        uavGPU.ptr += 3 * descriptorSize;
         mpCmdList->SetComputeRootDescriptorTable(1, uavGPU);
+        mpCmdList->SetComputeRootConstantBufferView(2, mpConstantBuffer->GetGPUVirtualAddress());
 
         mpCmdList->SetPipelineState1(mpPipelineState); // Set the pipeline state
 
@@ -637,11 +853,38 @@ public:
 
 
         mpCmdList->DispatchRays(&raytraceDesc);
+        uavBarrier(mpCmdList, mpOutputResource);
+
+        transitionResource(mpCmdList, mpOutputResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        transitionResource(mpCmdList, pSwapChainBuffer[rtvIndex], D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
         mpCmdList->CopyResource(pSwapChainBuffer[rtvIndex], mpOutputResource);
+        transitionResource(mpCmdList, pSwapChainBuffer[rtvIndex], D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = m_RenderTargetViewHeap->GetCPUDescriptorHandleForHeapStart();
+        rtvHandle.ptr += rtvIndex * pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        mpCmdList->OMSetRenderTargets(1, &rtvHandle, false, nullptr);
+
+        ImGui_ImplDX12_NewFrame();
+        ImGui_ImplWin32_NewFrame();
+        ImGui::NewFrame();
+        ImGui::Begin("DXR Cube Controls");
+        ImGui::SliderFloat3("Tint", m_Tint, 0.0f, 1.0f);
+        ImGui::SliderFloat3("Camera", m_Camera, -5.0f, 5.0f);
+        ImGui::End();
+        ImGui::Render();
+
+        ID3D12DescriptorHeap* guiHeaps[] = { m_ImGuiHeap };
+        mpCmdList->SetDescriptorHeaps(1, guiHeaps);
+        ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), mpCmdList);
+
+        transitionResource(mpCmdList, pSwapChainBuffer[rtvIndex], D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+        transitionResource(mpCmdList, mpOutputResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
         mFenceValue = submitCommandList(mpCmdList, mpCmdQueue, mpFence, mFenceValue);
         mpSwapChain->Present(0, 0);
 
+        mpFence->SetEventOnCompletion(mFenceValue, mFenceEvent);
+        WaitForSingleObject(mFenceEvent, INFINITE);
 
         pCmdAllocator->Reset();
         mpCmdList->Reset(pCmdAllocator, nullptr);
@@ -649,6 +892,10 @@ public:
 
     void Shutdown()
     {
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplWin32_Shutdown();
+        ImGui::DestroyContext();
+
         // Wait for the command queue to finish execution
         mFenceValue++;
         mpCmdQueue->Signal(mpFence, mFenceValue);
@@ -662,11 +909,11 @@ int main()
 {
     uint32_t width = 1280;
     uint32_t height = 820;
-    const wchar_t title[] = L"DirectX Ray Tracing VertexBuffer";
+    const wchar_t title[] = L"DX12 ImGui";
 
     RenderSystem render{};
 
-    WNDCLASSEX wcex = { sizeof(WNDCLASSEX), CS_CLASSDC, DefWindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, title, nullptr };
+    WNDCLASSEX wcex = { sizeof(WNDCLASSEX), CS_CLASSDC, ImGuiWindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, title, nullptr };
     RegisterClassEx(&wcex);
 
     RECT windowRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };

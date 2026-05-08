@@ -3,9 +3,9 @@
 
 #include <Windows.h>
 #include <d3d12.h>
-#include "../Dta/imgui.h"
-#include "../Dta/imgui_impl_win32.h"
-#include "../Dta/imgui_impl_dx12.h"
+#include <imgui.h>
+#include <imgui_impl_win32.h>
+#include <imgui_impl_dx12.h>
 
 #include "DescriptorHeap.h"
 

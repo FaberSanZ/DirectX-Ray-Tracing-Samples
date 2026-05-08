@@ -1,40 +1,49 @@
+# DirectX Ray Tracing Samples
 
+Repositorio de ejemplos progresivos de DirectX Raytracing (DXR), construidos con CMake.
 
-            
+La idea es que cada ejemplo agregue una sola pieza nueva del pipeline, sin saltos grandes: primero escribir a una textura, luego acceleration structures, luego buffers de vertices, indices, constant buffers e ImGui.
 
-# 🌀 DirectX Ray Tracing Ultimate® Samples
+## Build
 
-</br>
+```powershell
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Debug
+```
 
-📝This repository contains **small, progressive DirectX Ray Tracing examples**, designed to teach and demonstrate each part of the graphics pipeline in an intuitive and minimalistic way.  
-Each sample is isolated and focused, making it easy to learn DirectX Ray Tracing step by step, without unnecessary complexity.
+Ejecutar un ejemplo:
 
-</br>
+```powershell
+.\build\Debug\ClearScreen.exe
+```
 
+## Requirements
 
-
+- Windows 10/11
+- Visual Studio 2022 con workload de C++
+- GPU compatible con DirectX 12 / DXR
+- CMake 3.24 o superior
 
 ## Examples
 
-
 Example | Details
 ---------|--------
-<img src="Screenshots/Pipeline.png" width=380> | [Pipeline](Src/Pipeline)<br> This example shows how to use DirectX Raytracing (DXR) to write directly to a texture using a ray generation shader. No acceleration structures or geometry are used — this is the simplest possible DXR setup, useful to understand how DispatchRays works and how GPU threads map to pixels. (PSOs [ID3D12PipelineState])
-<img src="Screenshots/AccelerationStructures.png" width=380> | [AccelerationStructures](Src/AccelerationStructures)<br> This example introduces acceleration structures (BLAS and TLAS) and shows how to trace rays against real geometry. A single triangle is built into a bottom-level acceleration structure and instanced in a top-level structure. Rays are dispatched and intersect the triangle using the ray tracing pipeline (ray generation, miss, and closest hit shaders).
-<img src="Screenshots/VertexBuffer.png" width=380> | [VertexBuffer](Src/VertexBuffer)<br>This example demonstrates how to provide vertex data to a DirectX Raytracing (DXR) pipeline using a StructuredBuffer accessed via a Shader Resource View (SRV). Vertex attributes, such as position, color, normals, or UVs, are read directly by ray generation and closest hit shaders. This approach enables vertex pulling.
-<img src="Screenshots/IndexBuffer.png" width=380> | [IndexBuffer](Src/IndexBuffer)<br> This example demonstrates how to provide index data to a DXR pipeline using a StructuredBuffer through a Shader Resource View (SRV). The index buffer defines the connectivity of vertices to form triangles and is accessed directly by ray tracing shaders. Combined with the vertex buffer, this enables ray tracing shaders to traverse and intersect geometry.
+<img src="Screenshots/ClearScreen.png" width=380> | [ClearScreen](Src/ClearScreen)<br>Primer ejemplo DXR. Crea un raytracing pipeline minimo con solo `rayGen`, escribe un gradiente a una UAV y copia esa textura al swap chain. No hay geometria, BLAS, TLAS, miss shader ni closest-hit shader.
+<img src="Screenshots/AccelerationStructures.png" width=380> | [AccelerationStructures](Src/AccelerationStructures)<br>Introduce acceleration structures. Construye una BLAS para un triangulo y una TLAS que instancia esa BLAS. El ray generation shader dispara rayos primarios, el miss shader pinta el fondo y el closest-hit shader pinta el triangulo.
+<img src="Screenshots/VertexBuffer.png" width=380> | [VertexBuffer](Src/VertexBuffer)<br>Agrega lectura de vertex buffer desde shaders DXR. El closest-hit shader accede a un `StructuredBuffer<Vertex>` como SRV y usa coordenadas baricentricas para interpolar colores por vertice.
+<img src="Screenshots/IndexBuffer.png" width=380> | [IndexBuffer](Src/IndexBuffer)<br>Agrega index buffer. La BLAS usa vertices compartidos e indices para formar dos triangulos, y el closest-hit shader lee `StructuredBuffer<uint>` para resolver los vertices de cada primitiva.
+<img src="Screenshots/ConstantBuffer.png" width=380> | [ConstantBuffer](Src/ConstantBuffer)<br>Agrega constant buffers al root signature global. El ejemplo renderiza un cubo DXR indexado, usa matrices `world/view/projection/inverseViewProjection` para una camara real y rota el cubo actualizando la instancia TLAS por frame.
+<img src="Screenshots/ImGui.png" width=380> | [ImGui](Src/ImGui)<br>Integra Dear ImGui encima del resultado DXR. Mantiene la camara con matrices reales, el cubo rotando por TLAS y permite ajustar parametros desde UI antes de dibujar ImGui sobre el back buffer.
 
+## Repository Layout
 
+- `Assets/Shaders`: librerias HLSL DXR por ejemplo.
+- `External`: dependencias externas usadas desde `Common`.
+- `Src/Common`: utilidades compartidas de ventana, descriptores, GUI y compilacion DXC.
+- `Src/<Example>`: un `.cpp` del ejemplo y un `README.md` tutorial.
 
+## Notes
 
-## 📘 Goals
-
-- Help others learn how to use **pure DirectX Ray Tracing**.
-- Serve as a personal reference for building engines or tools.
-- Keep things clean, readable, and low-level.
-
-## 🎯 Requirements
-
-- Windows 10/11
-- Visual Studio 2019 or newer
-- DirectX Ray Tracing compatible GPU
+- No se versionan `.sln`, `.vcxproj` ni archivos generados por Visual Studio.
+- CMake genera la solucion en `build/`.
+- CMake tambien agrega la referencia NuGet a `Microsoft.Direct3D.DXC`.

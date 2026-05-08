@@ -362,7 +362,7 @@ public:
         subobjects.reserve(12);
 
         // Create the DXIL library subobject, which contains the raytracing shaders. We will export all the shaders with the same names as the entry points in the HLSL code, but we could choose different export names if we wanted to
-        auto pShaderBlob = shaderCompiler.Compile(L"../../../../Assets/Shaders/AccelerationStructures/Mesh.hlsl", L"lib_6_3");
+        auto pShaderBlob = shaderCompiler.Compile(L"../../Assets/Shaders/AccelerationStructures/Mesh.hlsl", L"lib_6_3");
 
         const WCHAR* exports[] =
         {
@@ -643,8 +643,10 @@ int main()
     WNDCLASSEX wcex = { sizeof(WNDCLASSEX), CS_CLASSDC, DefWindowProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, title, nullptr };
     RegisterClassEx(&wcex);
 
-    // Create a window
-    HWND hWnd = CreateWindow(title, title, WS_OVERLAPPEDWINDOW, 100, 100, width, height, nullptr, nullptr, wcex.hInstance, nullptr);
+    RECT windowRect = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
+    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+
+    HWND hWnd = CreateWindow(title, title, WS_OVERLAPPEDWINDOW, 100, 100, windowRect.right - windowRect.left, windowRect.bottom - windowRect.top, nullptr, nullptr, wcex.hInstance, nullptr);
     ShowWindow(hWnd, SW_SHOW);
 
     render.Initialize(hWnd, width, height);
